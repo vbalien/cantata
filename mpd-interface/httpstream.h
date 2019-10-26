@@ -28,6 +28,8 @@
 
 #ifdef LIBVLC_FOUND
 #include <vlc/vlc.h>
+#elif LIBMPV_FOUND
+#include <mpv/client.h>
 #else
 #include <QtMultimedia/QMediaPlayer>
 #endif
@@ -62,7 +64,7 @@ private Q_SLOTS:
     void updateStatus();
     void streamUrl(const QString &url);
     void checkPlayer();
-#ifndef LIBVLC_FOUND
+#if !defined(LIBVLC_FOUND) && !defined(LIBMPV_FOUND)
     void bufferingProgress(int progress);
 #endif
 
@@ -83,6 +85,8 @@ private:
     libvlc_instance_t *instance;
     libvlc_media_player_t *player;
     libvlc_media_t *media;
+    #elif LIBMPV_FOUND
+    mpv_handle *player;
     #else
     QMediaPlayer *player;
     #endif

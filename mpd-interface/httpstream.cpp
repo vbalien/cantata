@@ -27,7 +27,7 @@
 #include "gui/settings.h"
 #include "support/globalstatic.h"
 #include "support/configuration.h"
-#ifndef LIBVLC_FOUND
+#if !defined(LIBVLC_FOUND) && !defined(LIBMPV_FOUND)
 #include <QtMultimedia/QMediaPlayer>
 #endif
 #include <QTimer>
@@ -82,6 +82,8 @@ void HttpStream::setEnabled(bool e)
             save();
             #ifdef LIBVLC_FOUND
             libvlc_media_player_stop(player);
+            #elif LIBMPV_FOUND
+            mpv_command_string(player, "stop");
             #else
             player->stop();
             #endif
@@ -97,6 +99,9 @@ void HttpStream::setVolume(int vol)
         currentVolume = vol;
         #ifdef LIBVLC_FOUND
         libvlc_audio_set_volume(player, vol);
+        #elif LIBMPV_FOUND
+        double d_vol = (double)vol;
+        mpv_set_property(player, "volume", MPV_FORMAT_DOUBLE, &d_vol);
         #else
         player->setVolume(vol);
         #endif
@@ -114,6 +119,10 @@ int HttpStream::volume()
     if (player && !isMuted()) {
         #ifdef LIBVLC_FOUND
         vol = libvlc_audio_get_volume(player);
+        #elif LIBMPV_FOUND
+        double d_vol = 0.f;
+        mpv_get_property(player, "volume", MPV_FORMAT_DOUBLE, &d_vol);
+        vol = (int)d_vol;
         #else
         vol = player->volume();
         #endif
@@ -134,6 +143,9 @@ void HttpStream::toggleMute()
         muted =! muted;
         #ifdef LIBVLC_FOUND
         libvlc_audio_set_mute(player, muted);
+        #elif LIBMPV_FOUND
+        int flag = muted ? 1 : 0;
+        mpv_set_property(player, "mute", MPV_FORMAT_FLAG, &flag);
         #else
         player->setMuted(!muted);
         #endif
@@ -151,6 +163,11 @@ void HttpStream::streamUrl(const QString &url)
         libvlc_release(instance);
         player = 0;
     }
+    #elif LIBMPV_FOUND
+    if (player) {
+        mpv_terminate_destroy(player);
+        player = nullptr;
+    }
     #else
     if (player) {
         QMediaContent media = player->media();
@@ -163,12 +180,18 @@ void HttpStream::streamUrl(const QString &url)
     #endif
     QUrl qUrl(url);
     if (!url.isEmpty() && qUrl.isValid() && qUrl.scheme().startsWith("http") && !player) {
-        #ifdef LIBVLC_FOUND
+        #if defined LIBVLC_FOUND
         instance = libvlc_new(0, NULL);
         QByteArray byteArrayUrl = url.toUtf8();
         media = libvlc_media_new_location(instance, byteArrayUrl.constData());
         player = libvlc_media_player_new_from_media(media);
         libvlc_media_release(media);
+        #elif LIBMPV_FOUND
+        player = mpv_create();
+        mpv_initialize(player);
+        QByteArray byteArrayUrl = url.toUtf8();
+        const char *cmd[] = {"loadfile", byteArrayUrl.constData(), NULL};
+        mpv_command(player, cmd);
         #else
         player = new QMediaPlayer(this);
         player->setMedia(qUrl);
@@ -186,7 +209,7 @@ void HttpStream::streamUrl(const QString &url)
     emit update();
 }
 
-#ifndef LIBVLC_FOUND
+#if !defined(LIBVLC_FOUND) && !defined(LIBMPV_FOUND)
 void HttpStream::bufferingProgress(int progress)
 {
     MPDStatus * const status = MPDStatus::self();
@@ -213,6 +236,10 @@ void HttpStream::updateStatus()
     bool playerNeedsToStart = status->state() == MPDState_Playing;
     #ifdef LIBVLC_FOUND
     playerNeedsToStart = playerNeedsToStart && libvlc_media_player_get_state(player) != libvlc_Playing;
+    #elif LIBMPV_FOUND
+    char* is_idle = mpv_get_property_string(player, "idle-active");
+    playerNeedsToStart = playerNeedsToStart && strcmp(is_idle, "yes");
+    // mpv_free(is_idle);
     #else
     playerNeedsToStart = playerNeedsToStart && player->state() == QMediaPlayer::StoppedState;
     #endif
@@ -229,6 +256,11 @@ void HttpStream::updateStatus()
         #ifdef LIBVLC_FOUND
             libvlc_media_player_play(player);
             startTimer();
+        #elif LIBMPV_FOUND
+            {
+                int flag = 0;
+                mpv_set_property(player, "pause", MPV_FORMAT_FLAG, &flag);
+            }
         #else
             QUrl url = player->media().canonicalUrl();
             player->setMedia(url);
@@ -241,6 +273,11 @@ void HttpStream::updateStatus()
         #ifdef LIBVLC_FOUND
         libvlc_media_player_stop(player);
         stopTimer();
+        #elif LIBMPV_FOUND
+        {
+            int flag = 1;
+            mpv_set_property(player, "pause", MPV_FORMAT_FLAG, &flag);
+        }
         #else
         player->stop();
         #endif
